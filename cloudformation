@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: A simple VPC with public and private subnets, an Internet Gateway, and route tables.
+
+#This is the Variables link Parameters
+#VPC Parameters/Variables
+Parameters:
+  VPCCIDR:
+    Type: String
+    Description: CIDR block for the VPC
+    Default: 10.0.0.0/16
+#Public Subnet1 
+  PublicSubnet1CIDR:
+    Type: String
+    Description: CIDR block for Public Subnet 1
+    Default: 10.0.1.0/24
+#Private Subnet1
+  PrivateSubnet1CIDR:
+    Type: String
+    Description: CIDR block for Private Subnet 1
+    Default: 10.0.2.0/24
+#Add Parameters to create EC2/VM
+#Select IAM Id
+  AMIId:
+    Type: AWS::EC2::Image::Id
+    Default: ami-01760eea5c574eb86 # Replace with a valid AMI ID for your region
+    Description: The AMI ID for the EC2 instance.
+#Select Instance type Link t2.micro
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    Description: The EC2 instance type.
+#Select Keypair to access via SSH
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: The name of an existing EC2 KeyPair to enable SSH access.
+
+
+#Create Complete VPC, 2 Subnets, Route, IG.
+#VPC
+Resources:
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: TANMAY-VPC
+#Internet Gateway
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: tanmay-IGW
+#Attach Internet Gateway to the VPC
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref MyInternetGateway
+#Public Subnet 1
+  MyPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref PublicSubnet1CIDR
+      AvailabilityZone: ap-south-1a # Selects the first AZ in the region
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: tanmay-PublicSubnet1
+
+#Private Subnet 2
+  MyPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      AvailabilityZone: ap-south-1b # Selects the first AZ in the region
+      Tags:
+        - Key: Name
+          Value: tanmay-PrivateSubnet2
+          
+#Public Route 1
+  MyPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: tanmay-PublicRoute1
+
+#Public Route Attched to internet gateway
+  MyInternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref MyPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+
+# Public Subnet 1 is association to the Public Route 1
+  MyPublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MyPublicSubnet1
+      RouteTableId: !Ref MyPublicRouteTable
+
+#Private Route 2
+  MyPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: tanmay-PrivateRoute2
+
+# Private Subnet 2 is association to the Private Route 2
+  MyPrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MyPrivateSubnet1
+      RouteTableId: !Ref MyPrivateRouteTable
+
+#Created Security Group for instance / VM
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0 # Allow HTTP from anywhere
+      Tags:
+        - Key: Name
+          Value: tanmay-SG
+
+#Created instance 
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMIId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          AssociatePublicIpAddress: true
+          SubnetId: !Ref MyPublicSubnet1
+          GroupSet:
+            - !Ref EC2SecurityGroup
+# Use User data to deploy Index.html using nginx server
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install nginx -y
+          systemctl enable nginx
+          systemctl start nginx
+          echo "<h1>Hello from Tanmay on EC2!</h1>" > /usr/share/nginx/html/index.html
+      Tags:
+        - Key: Name
+          Value: tanmay-VM1
+
+#Prints the Generated ID values of VPC, PublicSubnet, PrivateSubnet
+Outputs:
+  VPCId:
+    Description: The ID of the newly created VPC
+    Value: !Ref MyVPC
+  PublicSubnet1Id:
+    Description: The ID of Public Subnet 1
+    Value: !Ref MyPublicSubnet1
+  PrivateSubnet1Id:
+    Description: The ID of Private Subnet 1
+    Value: !Ref MyPrivateSubnet1
+  EC2InstancePublicIp:
+    Description: Public IP address of the EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
+  PublicIp:
+    Description: Public IP address of the Nginx EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
